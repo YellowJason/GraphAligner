@@ -19,6 +19,8 @@
 #include "MinimizerSeeder.h"
 #include "AlignmentSelection.h"
 #include "DiploidHeuristic.h"
+#include <sys/time.h>
+#include "timer.h"
 
 struct Seeder
 {
@@ -469,6 +471,11 @@ void runComponentMappings(const AlignmentGraph& alignmentGraph, const DiploidHeu
 		cerroutput = {std::cerr};
 		coutoutput = {std::cout};
 	}
+
+	size_t seeding_ms = 0;
+	size_t alignment_ms = 0;
+	auto timeStart_whole = std::chrono::system_clock::now();
+
 	while (true)
 	{
 		std::string* dealloc;
@@ -567,6 +574,7 @@ void runComponentMappings(const AlignmentGraph& alignmentGraph, const DiploidHeu
 				AlignmentSelection::AddMappingQualities(alignments.alignments);
 				auto alntimeEnd = std::chrono::system_clock::now();
 				alntimems = std::chrono::duration_cast<std::chrono::milliseconds>(alntimeEnd - alntimeStart).count();
+				alignment_ms += alntimems;
 				if (params.useDiploidHeuristic)
 				{
 					unsetForbiddenNodes(reusableState, diploidHeuristic, fastq->sequence);
@@ -693,6 +701,10 @@ void runComponentMappings(const AlignmentGraph& alignmentGraph, const DiploidHeu
 	}
 	assertSetNoRead("After all reads");
 	coutoutput << "Thread " << threadnum << " finished" << BufferedWriter::Flush;
+	auto timeEnd_whole = std::chrono::system_clock::now();
+	seeding_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeEnd_whole - timeStart_whole).count() - alignment_ms;
+	std::cout << "Thread " << threadnum << " seeding took " << seeding_ms << "ms" << std::endl;
+	std::cout << "Thread " << threadnum << " alignment took " << alignment_ms << "ms" << std::endl;
 }
 
 AlignmentGraph getGraph(std::string graphFile, MEMSeeder** mxmSeeder, const AlignerParams& params)
@@ -796,7 +808,10 @@ std::unordered_map<std::string, std::vector<SeedHit>> loadGafSeeds(const Alignme
 }
 
 void alignReads(AlignerParams params)
-{
+{	
+	GET_TIME_INIT(10);
+	GET_TIME_VAL(0);
+	std::cout << "Time 0 " << std::endl;
 	assertSetNoRead("Preprocessing");
 	AlignmentSelection::OverlapIncompatibleFractionCutoff = params.overlapIncompatibleCutoff;
 	{
@@ -816,12 +831,17 @@ void alignReads(AlignerParams params)
 			std::abort();
 		}
 	}
+	GET_TIME_VAL(1);
+	std::cout << "Time 1 " << std::endl;
 
 	const std::unordered_map<std::string, std::vector<SeedHit>>* seedHitsToThreads = nullptr;
 	std::unordered_map<std::string, std::vector<SeedHit>> seedHits;
 	MEMSeeder* memseeder = nullptr;
 	auto alignmentGraph = getGraph(params.graphFile, &memseeder, params);
 	DiploidHeuristicSplitter diploidHeuristic;
+	GET_TIME_VAL(2);
+	std::cout << "Time 2 " << std::endl;
+
 	if (params.useDiploidHeuristic)
 	{
 		bool loaded = false;
@@ -951,6 +971,8 @@ void alignReads(AlignerParams params)
 	if (params.outputCorrectedClippedFile != "") std::cout << "write corrected & clipped reads to " << params.outputCorrectedClippedFile << std::endl;
 
 	std::vector<std::thread> threads;
+	GET_TIME_VAL(3);
+	std::cout << "Time 3 " << std::endl;
 
 	assertSetNoRead("Running alignments");
 
@@ -1021,4 +1043,12 @@ void alignReads(AlignerParams params)
 	{
 		std::cout << "Alignment broke with some reads. Look at stderr output." << std::endl;
 	}
+	GET_TIME_VAL(4);
+	std::cout << "Time 4 " << std::endl;
+
+	std::cout << std::endl;
+	std::cout << "Loading Time     :\t" << (TIME_VAL_TO_MS(1) - TIME_VAL_TO_MS(0))/1000 << " s" << std::endl;
+	std::cout << "Graph building   :\t" << (TIME_VAL_TO_MS(2) - TIME_VAL_TO_MS(1))/1000 << " s" << std::endl;
+	std::cout << "Graph seeding    :\t" << (TIME_VAL_TO_MS(3) - TIME_VAL_TO_MS(2))/1000 << " s" << std::endl;
+	std::cout << "Align & Seed Time:\t" << (TIME_VAL_TO_MS(4) - TIME_VAL_TO_MS(3))/1000 << " s" << std::endl;
 }
